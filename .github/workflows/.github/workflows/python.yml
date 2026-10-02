@@ -1,0 +1,484 @@
+name: Build Python Cloud Control APK
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "mobile/**"
+      - ".github/workflows/python.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Create mobile project
+        shell: bash
+        run: |
+          mkdir -p mobile
+
+      - name: Create main.py
+        working-directory: mobile
+        shell: bash
+        run: |
+          cat > main.py <<'PY'
+          import json
+          import uuid
+          import threading
+
+          from kivy.app import App
+          from kivy.metrics import dp
+          from kivy.uix.boxlayout import BoxLayout
+          from kivy.uix.label import Label
+          from kivy.uix.button import Button
+          from kivy.uix.textinput import TextInput
+          from kivy.uix.spinner import Spinner
+          from kivy.uix.scrollview import ScrollView
+          from kivy.uix.popup import Popup
+
+          try:
+              import requests
+          except Exception:
+              requests = None
+
+
+          DEFAULT_SERVER = "https://YOUR-RENDER-SERVICE.onrender.com"
+
+
+          class CloudAPI:
+              def __init__(self):
+                  self.base_url = DEFAULT_SERVER
+                  self.token = ""
+
+              def headers(self):
+                  if not self.token:
+                      return {}
+
+                  return {
+                      "Authorization": f"Bearer {self.token}",
+                      "Content-Type": "application/json"
+                  }
+
+              def request(self, method, path, data=None):
+                  if requests is None:
+                      raise Exception("requests package unavailable")
+
+                  url = self.base_url.rstrip("/") + path
+
+                  response = requests.request(
+                      method,
+                      url,
+                      headers=self.headers(),
+                      json=data,
+                      timeout=20
+                  )
+
+                  try:
+                      payload = response.json()
+                  except Exception:
+                      payload = {
+                          "status_code": response.status_code,
+                          "text": response.text
+                      }
+
+                  if response.status_code >= 400:
+                      raise Exception(str(payload))
+
+                  return payload
+
+
+          class CloudControlApp(App):
+
+              def build(self):
+                  self.api = CloudAPI()
+
+                  root = BoxLayout(
+                      orientation="vertical",
+                      padding=dp(12),
+                      spacing=dp(8)
+                  )
+
+                  title = Label(
+                      text="Cloud Control",
+                      font_size=dp(26),
+                      size_hint_y=None,
+                      height=dp(55)
+                  )
+
+                  root.add_widget(title)
+
+                  self.server_input = TextInput(
+                      text=DEFAULT_SERVER,
+                      hint_text="FastAPI server URL",
+                      multiline=False,
+                      size_hint_y=None,
+                      height=dp(48)
+                  )
+
+                  root.add_widget(self.server_input)
+
+                  self.status = Label(
+                      text="● Server not connected",
+                      size_hint_y=None,
+                      height=dp(40)
+                  )
+
+                  root.add_widget(self.status)
+
+                  scroll = ScrollView()
+
+                  menu = BoxLayout(
+                      orientation="vertical",
+                      spacing=dp(8),
+                      size_hint_y=None
+                  )
+
+                  menu.bind(minimum_height=menu.setter("height"))
+
+                  buttons = [
+                      ("🏠 Home", self.home),
+                      ("🔑 Create Token", self.create_token),
+                      ("📱 Devices", self.devices),
+                      ("📡 Server Status", self.server_status),
+                      ("🗄 Supabase", self.supabase),
+                      ("🔥 Firebase", self.firebase),
+                      ("⚙ Settings", self.settings),
+                  ]
+
+                  for text, callback in buttons:
+                      button = Button(
+                          text=text,
+                          size_hint_y=None,
+                          height=dp(55)
+                      )
+                      button.bind(on_release=callback)
+                      menu.add_widget(button)
+
+                  scroll.add_widget(menu)
+                  root.add_widget(scroll)
+
+                  self.output = Label(
+                      text="Ready",
+                      size_hint_y=None,
+                      height=dp(90)
+                  )
+
+                  root.add_widget(self.output)
+
+                  return root
+
+              def configure(self):
+                  self.api.base_url = self.server_input.text.strip()
+
+              def show(self, title, text):
+                  popup = Popup(
+                      title=title,
+                      size_hint=(0.9, 0.65)
+                  )
+
+                  box = BoxLayout(
+                      orientation="vertical",
+                      padding=dp(10),
+                      spacing=dp(10)
+                  )
+
+                  box.add_widget(
+                      Label(text=text)
+                  )
+
+                  close = Button(
+                      text="Close",
+                      size_hint_y=None,
+                      height=dp(50)
+                  )
+
+                  close.bind(
+                      on_release=popup.dismiss
+                  )
+
+                  box.add_widget(close)
+                  popup.content = box
+                  popup.open()
+
+              def home(self, *_):
+                  self.configure()
+                  self.output.text = (
+                      "Cloud Control\n"
+                      "FastAPI client ready\n"
+                      "Choose a section above."
+                  )
+
+              def create_token(self, *_):
+                  self.configure()
+
+                  box = BoxLayout(
+                      orientation="vertical",
+                      spacing=dp(8),
+                      padding=dp(10)
+                  )
+
+                  type_select = Spinner(
+                      text="python",
+                      values=("python", "supabase", "firebase"),
+                      size_hint_y=None,
+                      height=dp(50)
+                  )
+
+                  name = TextInput(
+                      text="My Application",
+                      multiline=False,
+                      size_hint_y=None,
+                      height=dp(50)
+                  )
+
+                  create = Button(
+                      text="CREATE TOKEN",
+                      size_hint_y=None,
+                      height=dp(55)
+                  )
+
+                  box.add_widget(
+                      Label(text="Token type")
+                  )
+
+                  box.add_widget(type_select)
+
+                  box.add_widget(
+                      Label(text="Application name")
+                  )
+
+                  box.add_widget(name)
+                  box.add_widget(create)
+
+                  popup = Popup(
+                      title="Create Cloud Token",
+                      content=box,
+                      size_hint=(0.9, 0.65)
+                  )
+
+                  def make(_):
+                      try:
+                          self.configure()
+
+                          result = self.api.request(
+                              "POST",
+                              "/api/v1/tokens",
+                              {
+                                  "type": type_select.text,
+                                  "name": name.text
+                              }
+                          )
+
+                          token = result.get("token", "")
+
+                          popup.dismiss()
+
+                          self.show(
+                              "Token Created",
+                              token
+                          )
+
+                      except Exception as e:
+                          self.show(
+                              "Error",
+                              str(e)
+                          )
+
+                  create.bind(on_release=make)
+                  popup.open()
+
+              def devices(self, *_):
+                  self.configure()
+
+                  try:
+                      result = self.api.request(
+                          "GET",
+                          "/api/v1/devices"
+                      )
+
+                      devices = result.get(
+                          "devices",
+                          []
+                      )
+
+                      if not devices:
+                          text = "No connected devices."
+                      else:
+                          lines = []
+
+                          for d in devices:
+                              lines.append(
+                                  f"{d.get('device_name')}\n"
+                                  f"{d.get('platform')} • "
+                                  f"{d.get('app_name')}\n"
+                                  f"Last seen: "
+                                  f"{d.get('last_seen')}\n"
+                              )
+
+                          text = "\n".join(lines)
+
+                      self.show(
+                          "Connected Devices",
+                          text
+                      )
+
+                  except Exception as e:
+                      self.show(
+                          "Devices",
+                          str(e)
+                      )
+
+              def server_status(self, *_):
+                  self.configure()
+
+                  try:
+                      result = self.api.request(
+                          "GET",
+                          "/api/v1/server"
+                      )
+
+                      self.status.text = "● Server Online"
+
+                      self.show(
+                          "Server",
+                          json.dumps(
+                              result,
+                              indent=2
+                          )
+                      )
+
+                  except Exception as e:
+                      self.status.text = "● Server Offline"
+
+                      self.show(
+                          "Server Error",
+                          str(e)
+                      )
+
+              def supabase(self, *_):
+                  self.show(
+                      "Supabase",
+                      "Supabase service configuration is "
+                      "controlled by the FastAPI server."
+                  )
+
+              def firebase(self, *_):
+                  self.show(
+                      "Firebase",
+                      "Firebase service configuration is "
+                      "controlled by the FastAPI server."
+                  )
+
+              def settings(self, *_):
+                  self.show(
+                      "Settings",
+                      "Server URL:\n" +
+                      self.server_input.text
+                  )
+
+
+          if __name__ == "__main__":
+              CloudControlApp().run()
+          PY
+
+      - name: Create buildozer.spec
+        working-directory: mobile
+        shell: bash
+        run: |
+          cat > buildozer.spec <<'EOF'
+          [app]
+
+          title = Cloud Control
+          package.name = cloudcontrol
+          package.domain = com.cloudcontrol
+
+          source.dir = .
+          source.include_exts = py,png,jpg,kv,json
+
+          version = 1.0.0
+
+          requirements = python3,kivy,requests,certifi,urllib3,idna,charset-normalizer
+
+          orientation = portrait
+
+          fullscreen = 0
+
+          android.api = 35
+          android.minapi = 24
+
+          android.archs = arm64-v8a
+
+          android.allow_backup = True
+
+          android.permissions = INTERNET
+
+          android.enable_androidx = True
+
+          p4a.branch = master
+
+          [buildozer]
+
+          log_level = 2
+          warn_on_root = 1
+          EOF
+
+      - name: Install Buildozer
+        run: |
+          python -m pip install --upgrade pip
+          pip install buildozer cython==3.0.11
+
+      - name: Install Android build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            git \
+            zip \
+            unzip \
+            openjdk-17-jdk \
+            autoconf \
+            automake \
+            libtool \
+            pkg-config \
+            zlib1g-dev \
+            libncurses5-dev \
+            libncursesw5-dev \
+            cmake \
+            libffi-dev \
+            libssl-dev
+
+      - name: Build APK
+        working-directory: mobile
+        shell: bash
+        run: |
+          yes | buildozer android debug
+
+      - name: Find APK
+        id: apk
+        working-directory: mobile
+        shell: bash
+        run: |
+          APK=$(find bin -type f -name "*.apk" | head -n 1)
+
+          if [ -z "$APK" ]; then
+            echo "APK not found."
+            exit 1
+          fi
+
+          echo "APK=$APK" >> "$GITHUB_OUTPUT"
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Cloud-Control-APK
+          path: mobile/bin/*.apk
