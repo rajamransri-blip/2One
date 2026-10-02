@@ -1,14 +1,13 @@
-name: Build Python Cloud Control APK
+name: Build Cloud Control APK
 
 on:
   workflow_dispatch:
   push:
-    paths:
-      - "mobile/**"
-      - ".github/workflows/python.yml"
+    branches:
+      - main
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   apk:
@@ -18,467 +17,523 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
+      - name: Setup Java
+        uses: actions/setup-java@v4
         with:
-          python-version: "3.11"
+          distribution: temurin
+          java-version: "17"
 
-      - name: Create mobile project
+      - name: Generate Android project
         shell: bash
         run: |
-          mkdir -p mobile
+          rm -rf app
 
-      - name: Create main.py
-        working-directory: mobile
-        shell: bash
-        run: |
-          cat > main.py <<'PY'
-          import json
-          import uuid
-          import threading
+          mkdir -p app/src/main/java/com/cloudcontrol/app
+          mkdir -p app/src/main/res/values
 
-          from kivy.app import App
-          from kivy.metrics import dp
-          from kivy.uix.boxlayout import BoxLayout
-          from kivy.uix.label import Label
-          from kivy.uix.button import Button
-          from kivy.uix.textinput import TextInput
-          from kivy.uix.spinner import Spinner
-          from kivy.uix.scrollview import ScrollView
-          from kivy.uix.popup import Popup
+          cat > settings.gradle <<'EOF'
+          pluginManagement {
+              repositories {
+                  google()
+                  mavenCentral()
+                  gradlePluginPortal()
+              }
+          }
 
-          try:
-              import requests
-          except Exception:
-              requests = None
+          dependencyResolutionManagement {
+              repositoriesMode.set(
+                  RepositoriesMode.FAIL_ON_PROJECT_REPOS
+              )
 
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+          }
 
-          DEFAULT_SERVER = "https://YOUR-RENDER-SERVICE.onrender.com"
+          rootProject.name = "CloudControl"
+          include(":app")
+          EOF
 
+          cat > build.gradle <<'EOF'
+          plugins {
+              id 'com.android.application' version '8.7.3' apply false
+              id 'org.jetbrains.kotlin.android' version '2.0.21' apply false
+          }
+          EOF
 
-          class CloudAPI:
-              def __init__(self):
-                  self.base_url = DEFAULT_SERVER
-                  self.token = ""
+          cat > gradle.properties <<'EOF'
+          org.gradle.jvmargs=-Xmx3g -Dfile.encoding=UTF-8
+          android.useAndroidX=true
+          android.nonTransitiveRClass=true
+          kotlin.code.style=official
+          EOF
 
-              def headers(self):
-                  if not self.token:
-                      return {}
+          cat > app/build.gradle <<'EOF'
+          plugins {
+              id 'com.android.application'
+              id 'org.jetbrains.kotlin.android'
+          }
 
-                  return {
-                      "Authorization": f"Bearer {self.token}",
-                      "Content-Type": "application/json"
+          android {
+              namespace 'com.cloudcontrol.app'
+              compileSdk 35
+
+              defaultConfig {
+                  applicationId 'com.cloudcontrol.app'
+                  minSdk 24
+                  targetSdk 35
+                  versionCode 1
+                  versionName '1.0'
+              }
+
+              buildTypes {
+                  release {
+                      minifyEnabled false
                   }
+              }
 
-              def request(self, method, path, data=None):
-                  if requests is None:
-                      raise Exception("requests package unavailable")
+              compileOptions {
+                  sourceCompatibility JavaVersion.VERSION_17
+                  targetCompatibility JavaVersion.VERSION_17
+              }
 
-                  url = self.base_url.rstrip("/") + path
+              kotlinOptions {
+                  jvmTarget = '17'
+              }
+          }
 
-                  response = requests.request(
-                      method,
-                      url,
-                      headers=self.headers(),
-                      json=data,
-                      timeout=20
-                  )
+          dependencies {
+              implementation 'androidx.core:core-ktx:1.15.0'
+              implementation 'androidx.appcompat:appcompat:1.7.0'
+              implementation 'com.google.android.material:material:1.12.0'
+              implementation 'com.squareup.okhttp3:okhttp:4.12.0'
+              implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0'
+          }
+          EOF
 
-                  try:
-                      payload = response.json()
-                  except Exception:
-                      payload = {
-                          "status_code": response.status_code,
-                          "text": response.text
-                      }
+          cat > app/src/main/res/values/strings.xml <<'EOF'
+          <resources>
+              <string name="app_name">Cloud Control</string>
+          </resources>
+          EOF
 
-                  if response.status_code >= 400:
-                      raise Exception(str(payload))
+          cat > app/src/main/AndroidManifest.xml <<'EOF'
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-                  return payload
+              <uses-permission android:name="android.permission.INTERNET"/>
 
+              <application
+                  android:allowBackup="true"
+                  android:label="@string/app_name"
+                  android:theme="@style/AppTheme">
 
-          class CloudControlApp(App):
+                  <activity
+                      android:name=".MainActivity"
+                      android:exported="true">
 
-              def build(self):
-                  self.api = CloudAPI()
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN"/>
+                          <category android:name="android.intent.category.LAUNCHER"/>
+                      </intent-filter>
 
-                  root = BoxLayout(
-                      orientation="vertical",
-                      padding=dp(12),
-                      spacing=dp(8)
-                  )
+                  </activity>
 
-                  title = Label(
-                      text="Cloud Control",
-                      font_size=dp(26),
-                      size_hint_y=None,
-                      height=dp(55)
-                  )
+              </application>
 
-                  root.add_widget(title)
+          </manifest>
+          EOF
 
-                  self.server_input = TextInput(
-                      text=DEFAULT_SERVER,
-                      hint_text="FastAPI server URL",
-                      multiline=False,
-                      size_hint_y=None,
-                      height=dp(48)
-                  )
+          cat > app/src/main/res/values/styles.xml <<'EOF'
+          <resources>
 
-                  root.add_widget(self.server_input)
+              <style
+                  name="AppTheme"
+                  parent="Theme.Material3.DayNight.NoActionBar">
 
-                  self.status = Label(
-                      text="● Server not connected",
-                      size_hint_y=None,
-                      height=dp(40)
-                  )
+                  <item name="android:fontFamily">sans</item>
+                  <item name="android:windowLightStatusBar">true</item>
+                  <item name="android:navigationBarColor">#FFFFFF</item>
 
-                  root.add_widget(self.status)
+              </style>
 
-                  scroll = ScrollView()
+          </resources>
+          EOF
 
-                  menu = BoxLayout(
-                      orientation="vertical",
-                      spacing=dp(8),
-                      size_hint_y=None
-                  )
+          cat > app/src/main/java/com/cloudcontrol/app/MainActivity.kt <<'EOF'
+          package com.cloudcontrol.app
 
-                  menu.bind(minimum_height=menu.setter("height"))
+          import android.app.Activity
+          import android.os.Bundle
+          import android.graphics.Color
+          import android.view.Gravity
+          import android.view.ViewGroup
+          import android.widget.*
+          import okhttp3.*
+          import java.io.IOException
+          import java.util.UUID
 
-                  buttons = [
-                      ("🏠 Home", self.home),
-                      ("🔑 Create Token", self.create_token),
-                      ("📱 Devices", self.devices),
-                      ("📡 Server Status", self.server_status),
-                      ("🗄 Supabase", self.supabase),
-                      ("🔥 Firebase", self.firebase),
-                      ("⚙ Settings", self.settings),
-                  ]
+          class MainActivity : Activity() {
 
-                  for text, callback in buttons:
-                      button = Button(
-                          text=text,
-                          size_hint_y=None,
-                          height=dp(55)
+              private lateinit var server: EditText
+              private lateinit var token: EditText
+              private lateinit var result: TextView
+
+              private val client = OkHttpClient()
+
+              override fun onCreate(savedInstanceState: Bundle?) {
+                  super.onCreate(savedInstanceState)
+
+                  buildUI()
+              }
+
+              private fun buildUI() {
+
+                  val root = LinearLayout(this)
+
+                  root.orientation = LinearLayout.VERTICAL
+                  root.setPadding(32, 28, 32, 28)
+                  root.setBackgroundColor(Color.WHITE)
+
+                  val title = TextView(this)
+
+                  title.text = "Cloud Control"
+                  title.textSize = 28f
+                  title.setTextColor(Color.BLACK)
+
+                  root.addView(
+                      title,
+                      LinearLayout.LayoutParams(
+                          -1,
+                          70
                       )
-                      button.bind(on_release=callback)
-                      menu.add_widget(button)
-
-                  scroll.add_widget(menu)
-                  root.add_widget(scroll)
-
-                  self.output = Label(
-                      text="Ready",
-                      size_hint_y=None,
-                      height=dp(90)
                   )
 
-                  root.add_widget(self.output)
+                  val subtitle = TextView(this)
 
-                  return root
+                  subtitle.text =
+                      "Universal FastAPI Cloud Manager"
 
-              def configure(self):
-                  self.api.base_url = self.server_input.text.strip()
+                  subtitle.textSize = 15f
 
-              def show(self, title, text):
-                  popup = Popup(
-                      title=title,
-                      size_hint=(0.9, 0.65)
-                  )
-
-                  box = BoxLayout(
-                      orientation="vertical",
-                      padding=dp(10),
-                      spacing=dp(10)
-                  )
-
-                  box.add_widget(
-                      Label(text=text)
-                  )
-
-                  close = Button(
-                      text="Close",
-                      size_hint_y=None,
-                      height=dp(50)
-                  )
-
-                  close.bind(
-                      on_release=popup.dismiss
-                  )
-
-                  box.add_widget(close)
-                  popup.content = box
-                  popup.open()
-
-              def home(self, *_):
-                  self.configure()
-                  self.output.text = (
-                      "Cloud Control\n"
-                      "FastAPI client ready\n"
-                      "Choose a section above."
-                  )
-
-              def create_token(self, *_):
-                  self.configure()
-
-                  box = BoxLayout(
-                      orientation="vertical",
-                      spacing=dp(8),
-                      padding=dp(10)
-                  )
-
-                  type_select = Spinner(
-                      text="python",
-                      values=("python", "supabase", "firebase"),
-                      size_hint_y=None,
-                      height=dp(50)
-                  )
-
-                  name = TextInput(
-                      text="My Application",
-                      multiline=False,
-                      size_hint_y=None,
-                      height=dp(50)
-                  )
-
-                  create = Button(
-                      text="CREATE TOKEN",
-                      size_hint_y=None,
-                      height=dp(55)
-                  )
-
-                  box.add_widget(
-                      Label(text="Token type")
-                  )
-
-                  box.add_widget(type_select)
-
-                  box.add_widget(
-                      Label(text="Application name")
-                  )
-
-                  box.add_widget(name)
-                  box.add_widget(create)
-
-                  popup = Popup(
-                      title="Create Cloud Token",
-                      content=box,
-                      size_hint=(0.9, 0.65)
-                  )
-
-                  def make(_):
-                      try:
-                          self.configure()
-
-                          result = self.api.request(
-                              "POST",
-                              "/api/v1/tokens",
-                              {
-                                  "type": type_select.text,
-                                  "name": name.text
-                              }
-                          )
-
-                          token = result.get("token", "")
-
-                          popup.dismiss()
-
-                          self.show(
-                              "Token Created",
-                              token
-                          )
-
-                      except Exception as e:
-                          self.show(
-                              "Error",
-                              str(e)
-                          )
-
-                  create.bind(on_release=make)
-                  popup.open()
-
-              def devices(self, *_):
-                  self.configure()
-
-                  try:
-                      result = self.api.request(
-                          "GET",
-                          "/api/v1/devices"
+                  root.addView(
+                      subtitle,
+                      LinearLayout.LayoutParams(
+                          -1,
+                          55
                       )
+                  )
 
-                      devices = result.get(
-                          "devices",
-                          []
+                  server = EditText(this)
+
+                  server.hint =
+                      "https://your-server.onrender.com"
+
+                  server.singleLine = true
+
+                  root.addView(
+                      server,
+                      LinearLayout.LayoutParams(
+                          -1,
+                          65
                       )
+                  )
 
-                      if not devices:
-                          text = "No connected devices."
-                      else:
-                          lines = []
+                  token = EditText(this)
 
-                          for d in devices:
-                              lines.append(
-                                  f"{d.get('device_name')}\n"
-                                  f"{d.get('platform')} • "
-                                  f"{d.get('app_name')}\n"
-                                  f"Last seen: "
-                                  f"{d.get('last_seen')}\n"
-                              )
+                  token.hint = "Cloud Token"
+                  token.singleLine = true
 
-                          text = "\n".join(lines)
-
-                      self.show(
-                          "Connected Devices",
-                          text
+                  root.addView(
+                      token,
+                      LinearLayout.LayoutParams(
+                          -1,
+                          65
                       )
+                  )
 
-                  except Exception as e:
-                      self.show(
-                          "Devices",
-                          str(e)
-                      )
-
-              def server_status(self, *_):
-                  self.configure()
-
-                  try:
-                      result = self.api.request(
+                  addButton(
+                      root,
+                      "Server Status"
+                  ) {
+                      request(
                           "GET",
                           "/api/v1/server"
                       )
+                  }
 
-                      self.status.text = "● Server Online"
+                  addButton(
+                      root,
+                      "Connected Devices"
+                  ) {
+                      request(
+                          "GET",
+                          "/api/v1/devices"
+                      )
+                  }
 
-                      self.show(
-                          "Server",
-                          json.dumps(
-                              result,
-                              indent=2
-                          )
+                  addButton(
+                      root,
+                      "Services"
+                  ) {
+                      request(
+                          "GET",
+                          "/api/v1/services"
+                      )
+                  }
+
+                  addButton(
+                      root,
+                      "Create Python Token"
+                  ) {
+                      createToken("python")
+                  }
+
+                  addButton(
+                      root,
+                      "Create Supabase Token"
+                  ) {
+                      createToken("supabase")
+                  }
+
+                  addButton(
+                      root,
+                      "Create Firebase Token"
+                  ) {
+                      createToken("firebase")
+                  }
+
+                  result = TextView(this)
+
+                  result.text =
+                      "Ready"
+
+                  result.textSize = 14f
+                  result.setTextColor(Color.DKGRAY)
+                  result.setPadding(0, 25, 0, 0)
+
+                  root.addView(
+                      result,
+                      LinearLayout.LayoutParams(
+                          -1,
+                          0,
+                          1f
+                      )
+                  )
+
+                  setContentView(root)
+              }
+
+              private fun addButton(
+                  root: LinearLayout,
+                  label: String,
+                  action: () -> Unit
+              ) {
+
+                  val button = Button(this)
+
+                  button.text = label
+
+                  button.setOnClickListener {
+                      action()
+                  }
+
+                  root.addView(
+                      button,
+                      LinearLayout.LayoutParams(
+                          -1,
+                          55
+                      )
+                  )
+              }
+
+              private fun baseUrl(): String {
+
+                  return server.text
+                      .toString()
+                      .trim()
+                      .removeSuffix("/")
+              }
+
+              private fun headers(builder: Request.Builder) {
+
+                  val t =
+                      token.text.toString().trim()
+
+                  if (t.isNotEmpty()) {
+                      builder.header(
+                          "Authorization",
+                          "Bearer $t"
+                      )
+                  }
+              }
+
+              private fun request(
+                  method: String,
+                  path: String
+              ) {
+
+                  val url =
+                      baseUrl() + path
+
+                  if (url.contains("your-server")) {
+                      result.text =
+                          "Enter your Render server URL first."
+                      return
+                  }
+
+                  val builder =
+                      Request.Builder()
+                          .url(url)
+
+                  headers(builder)
+
+                  when (method) {
+                      "GET" ->
+                          builder.get()
+                  }
+
+                  client.newCall(
+                      builder.build()
+                  ).enqueue(
+                      object : Callback {
+
+                          override fun onFailure(
+                              call: Call,
+                              e: IOException
+                          ) {
+
+                              runOnUiThread {
+                                  result.text =
+                                      "Connection error:\n${e.message}"
+                              }
+                          }
+
+                          override fun onResponse(
+                              call: Call,
+                              response: Response
+                          ) {
+
+                              val body =
+                                  response.body
+                                      ?.string()
+                                      ?: ""
+
+                              runOnUiThread {
+                                  result.text =
+                                      body
+                              }
+                          }
+                      }
+                  )
+              }
+
+              private fun createToken(
+                  type: String
+              ) {
+
+                  val url =
+                      baseUrl() +
+                      "/api/v1/tokens"
+
+                  val json =
+                      """
+                      {
+                        "type":"$type",
+                        "name":"Cloud Control App"
+                      }
+                      """.trimIndent()
+
+                  val body =
+                      json.toRequestBody(
+                          "application/json".toMediaType()
                       )
 
-                  except Exception as e:
-                      self.status.text = "● Server Offline"
+                  val builder =
+                      Request.Builder()
+                          .url(url)
+                          .post(body)
 
-                      self.show(
-                          "Server Error",
-                          str(e)
-                      )
+                  headers(builder)
 
-              def supabase(self, *_):
-                  self.show(
-                      "Supabase",
-                      "Supabase service configuration is "
-                      "controlled by the FastAPI server."
+                  client.newCall(
+                      builder.build()
+                  ).enqueue(
+                      object : Callback {
+
+                          override fun onFailure(
+                              call: Call,
+                              e: IOException
+                          ) {
+
+                              runOnUiThread {
+                                  result.text =
+                                      "Error:\n${e.message}"
+                              }
+                          }
+
+                          override fun onResponse(
+                              call: Call,
+                              response: Response
+                          ) {
+
+                              val text =
+                                  response.body
+                                      ?.string()
+                                      ?: ""
+
+                              runOnUiThread {
+                                  result.text =
+                                      text
+                              }
+                          }
+                      }
                   )
-
-              def firebase(self, *_):
-                  self.show(
-                      "Firebase",
-                      "Firebase service configuration is "
-                      "controlled by the FastAPI server."
-                  )
-
-              def settings(self, *_):
-                  self.show(
-                      "Settings",
-                      "Server URL:\n" +
-                      self.server_input.text
-                  )
-
-
-          if __name__ == "__main__":
-              CloudControlApp().run()
-          PY
-
-      - name: Create buildozer.spec
-        working-directory: mobile
-        shell: bash
-        run: |
-          cat > buildozer.spec <<'EOF'
-          [app]
-
-          title = Cloud Control
-          package.name = cloudcontrol
-          package.domain = com.cloudcontrol
-
-          source.dir = .
-          source.include_exts = py,png,jpg,kv,json
-
-          version = 1.0.0
-
-          requirements = python3,kivy,requests,certifi,urllib3,idna,charset-normalizer
-
-          orientation = portrait
-
-          fullscreen = 0
-
-          android.api = 35
-          android.minapi = 24
-
-          android.archs = arm64-v8a
-
-          android.allow_backup = True
-
-          android.permissions = INTERNET
-
-          android.enable_androidx = True
-
-          p4a.branch = master
-
-          [buildozer]
-
-          log_level = 2
-          warn_on_root = 1
+              }
+          }
           EOF
 
-      - name: Install Buildozer
+      - name: Download Gradle
         run: |
-          python -m pip install --upgrade pip
-          pip install buildozer cython==3.0.11
-
-      - name: Install Android build dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            git \
-            zip \
-            unzip \
-            openjdk-17-jdk \
-            autoconf \
-            automake \
-            libtool \
-            pkg-config \
-            zlib1g-dev \
-            libncurses5-dev \
-            libncursesw5-dev \
-            cmake \
-            libffi-dev \
-            libssl-dev
+          wget -q https://services.gradle.org/distributions/gradle-8.10.2-bin.zip
+          unzip -q gradle-8.10.2-bin.zip
 
       - name: Build APK
-        working-directory: mobile
+        run: |
+          ./gradle-8.10.2/bin/gradle \
+            :app:assembleDebug \
+            --no-daemon \
+            --stacktrace
+
+      - name: Verify APK
+        run: |
+          test -f app/build/outputs/apk/debug/app-debug.apk
+
+      - name: Commit generated Android source
         shell: bash
         run: |
-          yes | buildozer android debug
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-      - name: Find APK
-        id: apk
-        working-directory: mobile
-        shell: bash
-        run: |
-          APK=$(find bin -type f -name "*.apk" | head -n 1)
+          git add app settings.gradle build.gradle gradle.properties
 
-          if [ -z "$APK" ]; then
-            echo "APK not found."
-            exit 1
+          if ! git diff --cached --quiet; then
+            git commit -m "Add Cloud Control Android app"
+            git push
           fi
-
-          echo "APK=$APK" >> "$GITHUB_OUTPUT"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: Cloud-Control-APK
-          path: mobile/bin/*.apk
+          path: app/build/outputs/apk/debug/app-debug.apk
+
+      - name: Upload Android source
+        uses: actions/upload-artifact@v4
+        with:
+          name: Cloud-Control-Android-Source
+          path: |
+            app/
+            settings.gradle
+            build.gradle
+            gradle.properties
