@@ -1,6 +1,7 @@
 # PTv Android App
 
 PTv is a Python/Kivy Android client for the PTv Cloud Control FastAPI server in `../server`.
+The default connection is `https://twoones-l0s0.onrender.com`.
 
 ## Features
 
@@ -11,6 +12,9 @@ PTv is a Python/Kivy Android client for the PTv Cloud Control FastAPI server in 
 - Admin-only token creation and token listing
 - Python, Supabase, and Firebase token types
 - Settings and stable device ID
+- Dark operations dashboard with separate Home, Devices, Services, Tokens, Logs, Diagnostics, and Settings screens
+- Persistent server URL, bearer token, and admin-key fields
+- Dashboard summary and safe runtime diagnostics
 
 ## Local run
 

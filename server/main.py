@@ -7,6 +7,7 @@ import hmac
 import os
 import secrets
 import sqlite3
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -16,8 +17,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 APP_NAME = "PTv"
-APP_VERSION = "1.0.0"
+APP_VERSION = "2.0.0"
 DB = os.getenv("DATABASE_PATH", "data/cloud.db")
+STARTED_AT = time.monotonic()
 
 app = FastAPI(title=f"{APP_NAME} Cloud Control API", version=APP_VERSION)
 
@@ -162,6 +164,63 @@ def server_status(authorization: str | None = Header(default=None)) -> dict[str,
         "server": APP_NAME,
         "status": "online",
         "token_type": token["token_type"],
+        "time": time_now(),
+    }
+
+
+@app.get("/api/v1/dashboard")
+def dashboard(
+    request: Request,
+    authorization: str | None = Header(default=None),
+) -> dict[str, Any]:
+    """Return a token-scoped operational summary for the PTv home screen."""
+    token = authenticate(authorization)
+    with connection() as conn:
+        devices = conn.execute(
+            "SELECT COUNT(*) FROM devices WHERE token_id = ?", (token["id"],)
+        ).fetchone()[0]
+        logs = conn.execute(
+            "SELECT COUNT(*) FROM logs WHERE token_id = ?", (token["id"],)
+        ).fetchone()[0]
+        tokens = conn.execute("SELECT COUNT(*) FROM tokens WHERE active = 1").fetchone()[0]
+    log_event(token["id"], "dashboard_viewed", client_ip(request))
+    return {
+        "success": True,
+        "service": APP_NAME,
+        "version": APP_VERSION,
+        "status": "online",
+        "summary": {"devices": devices, "logs": logs, "tokens": tokens},
+        "uptime_seconds": round(time.monotonic() - STARTED_AT, 1),
+        "time": time_now(),
+    }
+
+
+@app.get("/api/v1/diagnostics")
+def diagnostics(
+    request: Request,
+    authorization: str | None = Header(default=None),
+) -> dict[str, Any]:
+    """Return safe runtime diagnostics without exposing secrets or DB paths."""
+    token = authenticate(authorization)
+    db_ok = True
+    try:
+        with connection() as conn:
+            conn.execute("SELECT 1").fetchone()
+    except sqlite3.Error:
+        db_ok = False
+    log_event(token["id"], "diagnostics_viewed", client_ip(request))
+    return {
+        "success": True,
+        "service": APP_NAME,
+        "version": APP_VERSION,
+        "checks": {
+            "api": True,
+            "database": db_ok,
+            "supabase_configured": bool(os.getenv("SUPABASE_URL")),
+            "firebase_configured": bool(os.getenv("FIREBASE_PROJECT_ID")),
+            "admin_configured": bool(os.getenv("ADMIN_KEY", "").strip()),
+        },
+        "uptime_seconds": round(time.monotonic() - STARTED_AT, 1),
         "time": time_now(),
     }
 

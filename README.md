@@ -1,6 +1,7 @@
 # PTv Cloud Control
 
-PTv is a FastAPI cloud-control service with a Python/Kivy Android client.
+PTv is an advanced FastAPI cloud-control service with a dark Python/Kivy Android operations client.
+The current Render API is `https://twoones-l0s0.onrender.com`.
 
 ## Repository layout
 
@@ -19,6 +20,8 @@ Deploy `server/` as a Docker service. Configure these environment variables:
 - `SUPABASE_URL` and `FIREBASE_PROJECT_ID` — optional service availability flags
 
 The API exposes FastAPI docs at `/docs` and health at `/health`.
+Authenticated dashboard summary is available at `/api/v1/dashboard`.
+Safe runtime checks are available at `/api/v1/diagnostics`.
 
 ## Build the APK
 
@@ -34,4 +37,5 @@ The Android app connects to the API using a bearer token. Admin operations addit
 - CORS is configurable.
 - SQLite paths work for both `cloud.db` and nested paths.
 - API activity is written to the logs table.
+- Dashboard and diagnostics data are scoped to the authenticated token.
 - Local databases, bytecode, and Buildozer output are ignored by Git.
