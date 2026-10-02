@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: cloud-control-api
+    name: ptv-cloud-api
     runtime: docker
     plan: free
     dockerfilePath: ./Dockerfile
