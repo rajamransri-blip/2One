@@ -1,539 +1,1077 @@
-name: Build Cloud Control APK
+name: Python Cloud Control APK
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - main
 
 permissions:
   contents: write
 
 jobs:
-  apk:
-    runs-on: ubuntu-latest
+
+  build-python-apk:
+
+    runs-on: ubuntu-22.04
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
 
-      - name: Setup Java
+      # ============================================================
+      # 1. CHECKOUT
+      # ============================================================
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+
+      # ============================================================
+      # 2. PYTHON
+      # ============================================================
+
+      - name: Setup Python 3.10
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+
+      # ============================================================
+      # 3. JAVA 17
+      # ============================================================
+
+      - name: Setup Java 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "17"
 
-      - name: Generate Android project
+
+      # ============================================================
+      # 4. ANDROID SYSTEM PACKAGES
+      # ============================================================
+
+      - name: Install Android build dependencies
         shell: bash
         run: |
-          rm -rf app
 
-          mkdir -p app/src/main/java/com/cloudcontrol/app
-          mkdir -p app/src/main/res/values
+          sudo apt-get update
 
-          cat > settings.gradle <<'EOF'
-          pluginManagement {
-              repositories {
-                  google()
-                  mavenCentral()
-                  gradlePluginPortal()
-              }
-          }
+          sudo apt-get install -y \
+            git \
+            zip \
+            unzip \
+            wget \
+            curl \
+            openjdk-17-jdk \
+            python3-pip \
+            python3-virtualenv \
+            autoconf \
+            automake \
+            libtool \
+            libtool-bin \
+            libltdl-dev \
+            pkg-config \
+            zlib1g-dev \
+            libncurses5-dev \
+            libncursesw5-dev \
+            libtinfo5 \
+            cmake \
+            libffi-dev \
+            libssl-dev \
+            gettext \
+            autopoint \
+            patch \
+            build-essential
 
-          dependencyResolutionManagement {
-              repositoriesMode.set(
-                  RepositoriesMode.FAIL_ON_PROJECT_REPOS
-              )
+          sudo update-alternatives \
+            --set java \
+            /usr/lib/jvm/java-17-openjdk-amd64/bin/java
 
-              repositories {
-                  google()
-                  mavenCentral()
-              }
-          }
+          sudo update-alternatives \
+            --set javac \
+            /usr/lib/jvm/java-17-openjdk-amd64/bin/javac
 
-          rootProject.name = "CloudControl"
-          include(":app")
-          EOF
+          java -version
+          javac -version
+          autoconf --version
+          libtool --version
 
-          cat > build.gradle <<'EOF'
-          plugins {
-              id 'com.android.application' version '8.7.3' apply false
-              id 'org.jetbrains.kotlin.android' version '2.0.21' apply false
-          }
-          EOF
 
-          cat > gradle.properties <<'EOF'
-          org.gradle.jvmargs=-Xmx3g -Dfile.encoding=UTF-8
-          android.useAndroidX=true
-          android.nonTransitiveRClass=true
-          kotlin.code.style=official
-          EOF
+      # ============================================================
+      # 5. CLEAN OLD BUILD CACHE
+      # ============================================================
 
-          cat > app/build.gradle <<'EOF'
-          plugins {
-              id 'com.android.application'
-              id 'org.jetbrains.kotlin.android'
-          }
+      - name: Clean Android build caches
+        shell: bash
+        run: |
 
-          android {
-              namespace 'com.cloudcontrol.app'
-              compileSdk 35
+          rm -rf ~/.buildozer
+          rm -rf .buildozer
+          rm -rf bin
 
-              defaultConfig {
-                  applicationId 'com.cloudcontrol.app'
-                  minSdk 24
-                  targetSdk 35
-                  versionCode 1
-                  versionName '1.0'
-              }
+          mkdir -p ~/.buildozer
 
-              buildTypes {
-                  release {
-                      minifyEnabled false
-                  }
-              }
+          echo "Clean build environment ready."
 
-              compileOptions {
-                  sourceCompatibility JavaVersion.VERSION_17
-                  targetCompatibility JavaVersion.VERSION_17
-              }
 
-              kotlinOptions {
-                  jvmTarget = '17'
-              }
-          }
+      # ============================================================
+      # 6. INSTALL PYTHON BUILD TOOLS
+      # ============================================================
 
-          dependencies {
-              implementation 'androidx.core:core-ktx:1.15.0'
-              implementation 'androidx.appcompat:appcompat:1.7.0'
-              implementation 'com.google.android.material:material:1.12.0'
-              implementation 'com.squareup.okhttp3:okhttp:4.12.0'
-              implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0'
-          }
-          EOF
+      - name: Install Buildozer tools
+        shell: bash
+        run: |
 
-          cat > app/src/main/res/values/strings.xml <<'EOF'
-          <resources>
-              <string name="app_name">Cloud Control</string>
-          </resources>
-          EOF
+          python -m pip install --upgrade pip setuptools wheel
 
-          cat > app/src/main/AndroidManifest.xml <<'EOF'
-          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+          python -m pip install \
+            "Cython==0.29.37"
 
-              <uses-permission android:name="android.permission.INTERNET"/>
+          python -m pip install \
+            "buildozer==1.5.0"
 
-              <application
-                  android:allowBackup="true"
-                  android:label="@string/app_name"
-                  android:theme="@style/AppTheme">
+          buildozer --version
+          cython --version
 
-                  <activity
-                      android:name=".MainActivity"
-                      android:exported="true">
 
-                      <intent-filter>
-                          <action android:name="android.intent.action.MAIN"/>
-                          <category android:name="android.intent.category.LAUNCHER"/>
-                      </intent-filter>
+      # ============================================================
+      # 7. CREATE APP DIRECTORY
+      # ============================================================
 
-                  </activity>
+      - name: Create Python app source
+        shell: bash
+        run: |
 
-              </application>
+          rm -rf cloud_app
 
-          </manifest>
-          EOF
+          mkdir -p cloud_app
 
-          cat > app/src/main/res/values/styles.xml <<'EOF'
-          <resources>
 
-              <style
-                  name="AppTheme"
-                  parent="Theme.Material3.DayNight.NoActionBar">
+      # ============================================================
+      # 8. MAIN PYTHON APP
+      # ============================================================
 
-                  <item name="android:fontFamily">sans</item>
-                  <item name="android:windowLightStatusBar">true</item>
-                  <item name="android:navigationBarColor">#FFFFFF</item>
+      - name: Create main.py
+        working-directory: cloud_app
+        shell: bash
+        run: |
 
-              </style>
+          cat > main.py <<'PY'
 
-          </resources>
-          EOF
+          import json
+          import uuid
+          import threading
 
-          cat > app/src/main/java/com/cloudcontrol/app/MainActivity.kt <<'EOF'
-          package com.cloudcontrol.app
+          import requests
 
-          import android.app.Activity
-          import android.os.Bundle
-          import android.graphics.Color
-          import android.view.Gravity
-          import android.view.ViewGroup
-          import android.widget.*
-          import okhttp3.*
-          import java.io.IOException
-          import java.util.UUID
+          from kivy.app import App
+          from kivy.clock import Clock
+          from kivy.metrics import dp
+          from kivy.uix.boxlayout import BoxLayout
+          from kivy.uix.gridlayout import GridLayout
+          from kivy.uix.label import Label
+          from kivy.uix.button import Button
+          from kivy.uix.textinput import TextInput
+          from kivy.uix.spinner import Spinner
+          from kivy.uix.scrollview import ScrollView
+          from kivy.uix.popup import Popup
 
-          class MainActivity : Activity() {
 
-              private lateinit var server: EditText
-              private lateinit var token: EditText
-              private lateinit var result: TextView
+          APP_NAME = "Cloud Control"
+          APP_VERSION = "1.0.0"
 
-              private val client = OkHttpClient()
+          DEFAULT_SERVER = ""
 
-              override fun onCreate(savedInstanceState: Bundle?) {
-                  super.onCreate(savedInstanceState)
 
-                  buildUI()
-              }
+          class CloudAPI:
 
-              private fun buildUI() {
+              def __init__(self):
 
-                  val root = LinearLayout(this)
+                  self.server = ""
+                  self.token = ""
 
-                  root.orientation = LinearLayout.VERTICAL
-                  root.setPadding(32, 28, 32, 28)
-                  root.setBackgroundColor(Color.WHITE)
+              def configure(
+                  self,
+                  server,
+                  token
+              ):
 
-                  val title = TextView(this)
-
-                  title.text = "Cloud Control"
-                  title.textSize = 28f
-                  title.setTextColor(Color.BLACK)
-
-                  root.addView(
-                      title,
-                      LinearLayout.LayoutParams(
-                          -1,
-                          70
-                      )
+                  self.server = (
+                      server
+                      .strip()
+                      .rstrip("/")
                   )
 
-                  val subtitle = TextView(this)
+                  self.token = token.strip()
 
-                  subtitle.text =
-                      "Universal FastAPI Cloud Manager"
+              def headers(self):
 
-                  subtitle.textSize = 15f
+                  if not self.token:
+                      return {}
 
-                  root.addView(
-                      subtitle,
-                      LinearLayout.LayoutParams(
-                          -1,
-                          55
+                  return {
+                      "Authorization":
+                          "Bearer " + self.token,
+                      "Content-Type":
+                          "application/json"
+                  }
+
+              def request(
+                  self,
+                  method,
+                  endpoint,
+                  payload=None
+              ):
+
+                  if not self.server:
+
+                      raise Exception(
+                          "Server URL is empty."
                       )
+
+                  url = (
+                      self.server +
+                      endpoint
                   )
 
-                  server = EditText(this)
-
-                  server.hint =
-                      "https://your-server.onrender.com"
-
-                  server.singleLine = true
-
-                  root.addView(
-                      server,
-                      LinearLayout.LayoutParams(
-                          -1,
-                          65
-                      )
+                  response = requests.request(
+                      method=method,
+                      url=url,
+                      headers=self.headers(),
+                      json=payload,
+                      timeout=20
                   )
 
-                  token = EditText(this)
+                  try:
 
-                  token.hint = "Cloud Token"
-                  token.singleLine = true
+                      data = response.json()
 
-                  root.addView(
-                      token,
-                      LinearLayout.LayoutParams(
-                          -1,
-                          65
+                  except Exception:
+
+                      data = {
+                          "status_code":
+                              response.status_code,
+                          "response":
+                              response.text
+                      }
+
+                  if response.status_code >= 400:
+
+                      raise Exception(
+                          json.dumps(
+                              data,
+                              indent=2
+                          )
                       )
+
+                  return data
+
+
+          class CloudControlApp(App):
+
+              def __init__(self, **kwargs):
+
+                  super().__init__(**kwargs)
+
+                  self.api = CloudAPI()
+
+                  self.device_id = (
+                      str(uuid.uuid4())
                   )
 
-                  addButton(
-                      root,
-                      "Server Status"
-                  ) {
-                      request(
-                          "GET",
-                          "/api/v1/server"
-                      )
-                  }
+                  self.server_input = None
+                  self.token_input = None
+                  self.output = None
+                  self.status = None
 
-                  addButton(
-                      root,
-                      "Connected Devices"
-                  ) {
-                      request(
-                          "GET",
-                          "/api/v1/devices"
-                      )
-                  }
+              # ====================================================
+              # BUILD UI
+              # ====================================================
 
-                  addButton(
-                      root,
-                      "Services"
-                  ) {
-                      request(
-                          "GET",
-                          "/api/v1/services"
-                      )
-                  }
+              def build(self):
 
-                  addButton(
-                      root,
-                      "Create Python Token"
-                  ) {
-                      createToken("python")
-                  }
-
-                  addButton(
-                      root,
-                      "Create Supabase Token"
-                  ) {
-                      createToken("supabase")
-                  }
-
-                  addButton(
-                      root,
-                      "Create Firebase Token"
-                  ) {
-                      createToken("firebase")
-                  }
-
-                  result = TextView(this)
-
-                  result.text =
-                      "Ready"
-
-                  result.textSize = 14f
-                  result.setTextColor(Color.DKGRAY)
-                  result.setPadding(0, 25, 0, 0)
-
-                  root.addView(
-                      result,
-                      LinearLayout.LayoutParams(
-                          -1,
-                          0,
-                          1f
-                      )
+                  root = BoxLayout(
+                      orientation="vertical",
+                      padding=dp(12),
+                      spacing=dp(8)
                   )
 
-                  setContentView(root)
-              }
-
-              private fun addButton(
-                  root: LinearLayout,
-                  label: String,
-                  action: () -> Unit
-              ) {
-
-                  val button = Button(this)
-
-                  button.text = label
-
-                  button.setOnClickListener {
-                      action()
-                  }
-
-                  root.addView(
-                      button,
-                      LinearLayout.LayoutParams(
-                          -1,
-                          55
-                      )
+                  title = Label(
+                      text=(
+                          "[b]CLOUD CONTROL[/b]"
+                      ),
+                      markup=True,
+                      font_size=dp(25),
+                      size_hint_y=None,
+                      height=dp(55)
                   )
-              }
 
-              private fun baseUrl(): String {
+                  root.add_widget(title)
 
-                  return server.text
-                      .toString()
-                      .trim()
-                      .removeSuffix("/")
-              }
+                  subtitle = Label(
+                      text=(
+                          "Universal Python Cloud Manager"
+                      ),
+                      font_size=dp(14),
+                      size_hint_y=None,
+                      height=dp(35)
+                  )
 
-              private fun headers(builder: Request.Builder) {
+                  root.add_widget(subtitle)
 
-                  val t =
-                      token.text.toString().trim()
+                  self.server_input = TextInput(
+                      hint_text=(
+                          "https://your-server.onrender.com"
+                      ),
+                      multiline=False,
+                      size_hint_y=None,
+                      height=dp(48)
+                  )
 
-                  if (t.isNotEmpty()) {
-                      builder.header(
-                          "Authorization",
-                          "Bearer $t"
+                  root.add_widget(
+                      self.server_input
+                  )
+
+                  self.token_input = TextInput(
+                      hint_text="Cloud Token",
+                      multiline=False,
+                      password=True,
+                      size_hint_y=None,
+                      height=dp(48)
+                  )
+
+                  root.add_widget(
+                      self.token_input
+                  )
+
+                  connect = Button(
+                      text="CONNECT SERVER",
+                      size_hint_y=None,
+                      height=dp(52)
+                  )
+
+                  connect.bind(
+                      on_release=self.connect
+                  )
+
+                  root.add_widget(connect)
+
+                  self.status = Label(
+                      text="● Offline",
+                      size_hint_y=None,
+                      height=dp(35)
+                  )
+
+                  root.add_widget(
+                      self.status
+                  )
+
+                  scroll = ScrollView()
+
+                  menu = GridLayout(
+                      cols=2,
+                      spacing=dp(7),
+                      padding=dp(3),
+                      size_hint_y=None
+                  )
+
+                  menu.bind(
+                      minimum_height=
+                      menu.setter("height")
+                  )
+
+                  options = [
+
+                      (
+                          "🏠 HOME",
+                          self.home
+                      ),
+
+                      (
+                          "🔑 PYTHON TOKEN",
+                          lambda x:
+                              self.create_token(
+                                  "python"
+                              )
+                      ),
+
+                      (
+                          "🗄 SUPABASE TOKEN",
+                          lambda x:
+                              self.create_token(
+                                  "supabase"
+                              )
+                      ),
+
+                      (
+                          "🔥 FIREBASE TOKEN",
+                          lambda x:
+                              self.create_token(
+                                  "firebase"
+                              )
+                      ),
+
+                      (
+                          "📱 DEVICES",
+                          self.devices
+                      ),
+
+                      (
+                          "📡 SERVER",
+                          self.server_status
+                      ),
+
+                      (
+                          "☁ SERVICES",
+                          self.services
+                      ),
+
+                      (
+                          "📋 LOGS",
+                          self.logs
+                      ),
+
+                      (
+                          "🔐 TOKENS",
+                          self.tokens
+                      ),
+
+                      (
+                          "⚙ SETTINGS",
+                          self.settings
                       )
-                  }
-              }
+                  ]
 
-              private fun request(
-                  method: String,
-                  path: String
-              ) {
+                  for text, callback in options:
 
-                  val url =
-                      baseUrl() + path
+                      b = Button(
+                          text=text,
+                          size_hint_y=None,
+                          height=dp(55)
+                      )
 
-                  if (url.contains("your-server")) {
-                      result.text =
-                          "Enter your Render server URL first."
+                      b.bind(
+                          on_release=callback
+                      )
+
+                      menu.add_widget(b)
+
+                  scroll.add_widget(menu)
+
+                  root.add_widget(scroll)
+
+                  self.output = Label(
+                      text="Ready.",
+                      halign="left",
+                      valign="top",
+                      text_size=(None, None),
+                      size_hint_y=None,
+                      height=dp(130)
+                  )
+
+                  root.add_widget(
+                      self.output
+                  )
+
+                  return root
+
+              # ====================================================
+              # HELPERS
+              # ====================================================
+
+              def configure_api(self):
+
+                  self.api.configure(
+                      self.server_input.text,
+                      self.token_input.text
+                  )
+
+              def show_result(
+                  self,
+                  data
+              ):
+
+                  if isinstance(
+                      data,
+                      dict
+                  ):
+
+                      text = json.dumps(
+                          data,
+                          indent=2,
+                          ensure_ascii=False
+                      )
+
+                  else:
+
+                      text = str(data)
+
+                  self.output.text = text
+
+              def popup(
+                  self,
+                  title,
+                  message
+              ):
+
+                  box = BoxLayout(
+                      orientation="vertical",
+                      padding=dp(12),
+                      spacing=dp(10)
+                  )
+
+                  text = Label(
+                      text=str(message)
+                  )
+
+                  box.add_widget(text)
+
+                  close = Button(
+                      text="CLOSE",
+                      size_hint_y=None,
+                      height=dp(50)
+                  )
+
+                  box.add_widget(close)
+
+                  p = Popup(
+                      title=title,
+                      content=box,
+                      size_hint=(0.92, 0.70)
+                  )
+
+                  close.bind(
+                      on_release=p.dismiss
+                  )
+
+                  p.open()
+
+              def run_async(
+                  self,
+                  function,
+                  success
+              ):
+
+                  def worker():
+
+                      try:
+
+                          data = function()
+
+                          Clock.schedule_once(
+                              lambda dt:
+                              success(
+                                  data,
+                                  None
+                              ),
+                              0
+                          )
+
+                      except Exception as e:
+
+                          Clock.schedule_once(
+                              lambda dt:
+                              success(
+                                  None,
+                                  e
+                              ),
+                              0
+                          )
+
+                  threading.Thread(
+                      target=worker,
+                      daemon=True
+                  ).start()
+
+              # ====================================================
+              # HOME
+              # ====================================================
+
+              def home(self, *_):
+
+                  self.output.text = (
+                      "Cloud Control\n\n"
+                      "Python Cloud Client\n"
+                      "Server: " +
+                      (
+                          self.server_input.text
+                          or "Not configured"
+                      ) +
+                      "\n\n"
+                      "Select an option."
+                  )
+
+              # ====================================================
+              # CONNECT
+              # ====================================================
+
+              def connect(self, *_):
+
+                  self.configure_api()
+
+                  self.status.text = (
+                      "● Connecting..."
+                  )
+
+                  self.run_async(
+                      lambda:
+                          self.api.request(
+                              "GET",
+                              "/api/v1/server"
+                          ),
+                      self.connection_result
+                  )
+
+              def connection_result(
+                  self,
+                  data,
+                  error
+              ):
+
+                  if error:
+
+                      self.status.text = (
+                          "● Offline"
+                      )
+
+                      self.popup(
+                          "Connection failed",
+                          error
+                      )
+
                       return
-                  }
 
-                  val builder =
-                      Request.Builder()
-                          .url(url)
-
-                  headers(builder)
-
-                  when (method) {
-                      "GET" ->
-                          builder.get()
-                  }
-
-                  client.newCall(
-                      builder.build()
-                  ).enqueue(
-                      object : Callback {
-
-                          override fun onFailure(
-                              call: Call,
-                              e: IOException
-                          ) {
-
-                              runOnUiThread {
-                                  result.text =
-                                      "Connection error:\n${e.message}"
-                              }
-                          }
-
-                          override fun onResponse(
-                              call: Call,
-                              response: Response
-                          ) {
-
-                              val body =
-                                  response.body
-                                      ?.string()
-                                      ?: ""
-
-                              runOnUiThread {
-                                  result.text =
-                                      body
-                              }
-                          }
-                      }
+                  self.status.text = (
+                      "● ONLINE"
                   )
-              }
 
-              private fun createToken(
-                  type: String
-              ) {
+                  self.show_result(data)
 
-                  val url =
-                      baseUrl() +
-                      "/api/v1/tokens"
+              # ====================================================
+              # SERVER
+              # ====================================================
 
-                  val json =
-                      """
-                      {
-                        "type":"$type",
-                        "name":"Cloud Control App"
-                      }
-                      """.trimIndent()
+              def server_status(self, *_):
 
-                  val body =
-                      json.toRequestBody(
-                          "application/json".toMediaType()
+                  self.configure_api()
+
+                  self.run_async(
+                      lambda:
+                          self.api.request(
+                              "GET",
+                              "/api/v1/server"
+                          ),
+                      self.operation_result
+                  )
+
+              # ====================================================
+              # SERVICES
+              # ====================================================
+
+              def services(self, *_):
+
+                  self.configure_api()
+
+                  self.run_async(
+                      lambda:
+                          self.api.request(
+                              "GET",
+                              "/api/v1/services"
+                          ),
+                      self.operation_result
+                  )
+
+              # ====================================================
+              # DEVICES
+              # ====================================================
+
+              def devices(self, *_):
+
+                  self.configure_api()
+
+                  self.run_async(
+                      lambda:
+                          self.api.request(
+                              "GET",
+                              "/api/v1/devices"
+                          ),
+                      self.operation_result
+                  )
+
+              # ====================================================
+              # LOGS
+              # ====================================================
+
+              def logs(self, *_):
+
+                  self.configure_api()
+
+                  self.run_async(
+                      lambda:
+                          self.api.request(
+                              "GET",
+                              "/api/v1/logs"
+                          ),
+                      self.operation_result
+                  )
+
+              # ====================================================
+              # TOKENS
+              # ====================================================
+
+              def tokens(self, *_):
+
+                  self.configure_api()
+
+                  self.run_async(
+                      lambda:
+                          self.api.request(
+                              "GET",
+                              "/api/v1/tokens"
+                          ),
+                      self.operation_result
+                  )
+
+              # ====================================================
+              # CREATE TOKEN
+              # ====================================================
+
+              def create_token(
+                  self,
+                  token_type
+              ):
+
+                  self.configure_api()
+
+                  name = (
+                      "Cloud Control "
+                      + token_type
+                  )
+
+                  payload = {
+                      "type":
+                          token_type,
+                      "name":
+                          name
+                  }
+
+                  self.run_async(
+                      lambda:
+                          self.api.request(
+                              "POST",
+                              "/api/v1/tokens",
+                              payload
+                          ),
+                      self.token_result
+                  )
+
+              def token_result(
+                  self,
+                  data,
+                  error
+              ):
+
+                  if error:
+
+                      self.popup(
+                          "Token error",
+                          error
                       )
 
-                  val builder =
-                      Request.Builder()
-                          .url(url)
-                          .post(body)
+                      return
 
-                  headers(builder)
+                  token = ""
 
-                  client.newCall(
-                      builder.build()
-                  ).enqueue(
-                      object : Callback {
+                  if isinstance(
+                      data,
+                      dict
+                  ):
 
-                          override fun onFailure(
-                              call: Call,
-                              e: IOException
-                          ) {
+                      token = data.get(
+                          "token",
+                          ""
+                      )
 
-                              runOnUiThread {
-                                  result.text =
-                                      "Error:\n${e.message}"
-                              }
-                          }
+                  self.show_result(data)
 
-                          override fun onResponse(
-                              call: Call,
-                              response: Response
-                          ) {
+                  if token:
 
-                              val text =
-                                  response.body
-                                      ?.string()
-                                      ?: ""
+                      self.popup(
+                          "TOKEN CREATED",
+                          token
+                      )
 
-                              runOnUiThread {
-                                  result.text =
-                                      text
-                              }
-                          }
-                      }
+              # ====================================================
+              # SETTINGS
+              # ====================================================
+
+              def settings(self, *_):
+
+                  self.popup(
+                      "Settings",
+                      (
+                          "Cloud Control\n\n"
+                          "Version: "
+                          + APP_VERSION +
+                          "\n\n"
+                          "Device ID:\n"
+                          + self.device_id
+                      )
                   )
-              }
-          }
+
+              # ====================================================
+              # RESULT
+              # ====================================================
+
+              def operation_result(
+                  self,
+                  data,
+                  error
+              ):
+
+                  if error:
+
+                      self.popup(
+                          "Server error",
+                          error
+                      )
+
+                      return
+
+                  self.show_result(data)
+
+
+          if __name__ == "__main__":
+
+              CloudControlApp().run()
+
+          PY
+
+
+      # ============================================================
+      # 9. BUILD CONFIGURATION
+      # ============================================================
+
+      - name: Create buildozer.spec
+        working-directory: cloud_app
+        shell: bash
+        run: |
+
+          cat > buildozer.spec <<'EOF'
+
+          [app]
+
+          title = Cloud Control
+
+          package.name = cloudcontrol
+
+          package.domain = com.cloudcontrol
+
+          source.dir = .
+
+          source.include_exts = py,png,jpg,jpeg,kv,json,atlas
+
+          version = 1.0.0
+
+          requirements = python3,kivy==2.3.0,requests,certifi,urllib3,idna,charset-normalizer
+
+          orientation = portrait
+
+          fullscreen = 0
+
+          android.api = 35
+
+          android.minapi = 24
+
+          android.ndk = 29
+
+          android.archs = arm64-v8a
+
+          android.accept_sdk_license = True
+
+          android.enable_androidx = True
+
+          android.permissions = android.permission.INTERNET,android.permission.ACCESS_NETWORK_STATE
+
+          android.allow_backup = True
+
+          android.copy_libs = 1
+
+          p4a.branch = master
+
+          p4a.bootstrap = sdl2
+
+          log_level = 2
+
+          warn_on_root = 1
+
           EOF
 
-      - name: Download Gradle
-        run: |
-          wget -q https://services.gradle.org/distributions/gradle-8.10.2-bin.zip
-          unzip -q gradle-8.10.2-bin.zip
 
-      - name: Build APK
+      # ============================================================
+      # 10. TEST PYTHON SOURCE
+      # ============================================================
+
+      - name: Validate Python source
+        working-directory: cloud_app
+        shell: bash
         run: |
-          ./gradle-8.10.2/bin/gradle \
-            :app:assembleDebug \
-            --no-daemon \
-            --stacktrace
+
+          python -m py_compile main.py
+
+          echo "Python source OK."
+
+
+      # ============================================================
+      # 11. AUTOCONF / LIBTOOL CHECK
+      # ============================================================
+
+      - name: Verify Autotools
+        shell: bash
+        run: |
+
+          which autoconf
+          which automake
+          which libtool
+          which libtoolize
+
+          aclocal --print-ac-dir
+
+          test -f \
+            /usr/share/aclocal/libtool.m4
+
+          echo "Autotools OK."
+
+
+      # ============================================================
+      # 12. BUILD
+      # ============================================================
+
+      - name: Build Python APK
+        working-directory: cloud_app
+        shell: bash
+        env:
+          P4A_BUILD_PYTHON_VERSION: "3.10.11"
+        run: |
+
+          buildozer -v android debug
+
+
+      # ============================================================
+      # 13. VERIFY APK
+      # ============================================================
 
       - name: Verify APK
-        run: |
-          test -f app/build/outputs/apk/debug/app-debug.apk
-
-      - name: Commit generated Android source
+        working-directory: cloud_app
         shell: bash
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          git add app settings.gradle build.gradle gradle.properties
+          echo "APK files:"
 
-          if ! git diff --cached --quiet; then
-            git commit -m "Add Cloud Control Android app"
-            git push
+          find bin \
+            -type f \
+            -name "*.apk" \
+            -print
+
+          COUNT=$(find bin \
+            -type f \
+            -name "*.apk" | wc -l)
+
+          if [ "$COUNT" -lt 1 ]; then
+              echo "APK was not generated."
+              exit 1
           fi
+
+          echo "APK generated successfully."
+
+
+      # ============================================================
+      # 14. COPY SOURCES TO REPOSITORY ROOT
+      # ============================================================
+
+      - name: Prepare repository source
+        shell: bash
+        run: |
+
+          rm -rf python_app
+
+          mkdir -p python_app
+
+          cp cloud_app/main.py \
+             python_app/main.py
+
+          cp cloud_app/buildozer.spec \
+             python_app/buildozer.spec
+
+          cat > python_app/README.md <<'EOF'
+          # Cloud Control Python Android App
+
+          Python/Kivy Android client for the Cloud Control FastAPI server.
+
+          Features:
+
+          - Server connection
+          - Cloud token authentication
+          - Python token
+          - Supabase token
+          - Firebase token
+          - Connected devices
+          - Server status
+          - Services
+          - Logs
+          - Token list
+          - Settings
+          - Device ID
+          EOF
+
+
+      # ============================================================
+      # 15. PUSH ALL APP SOURCES TO GITHUB
+      # ============================================================
+
+      - name: Push complete Python app source
+        shell: bash
+        run: |
+
+          git config user.name \
+            "github-actions[bot]"
+
+          git config user.email \
+            "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add python_app
+
+          if git diff --cached --quiet; then
+
+              echo "Source already up to date."
+
+          else
+
+              git commit \
+                -m "Add complete Python Cloud Control Android app"
+
+              git push origin HEAD:main
+
+          fi
+
+
+      # ============================================================
+      # 16. APK ARTIFACT
+      # ============================================================
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Cloud-Control-APK
-          path: app/build/outputs/apk/debug/app-debug.apk
+          name: Cloud-Control-Python-APK
+          path: cloud_app/bin/*.apk
+          if-no-files-found: error
 
-      - name: Upload Android source
+
+      # ============================================================
+      # 17. SOURCE ARTIFACT
+      # ============================================================
+
+      - name: Upload complete source
         uses: actions/upload-artifact@v4
         with:
-          name: Cloud-Control-Android-Source
-          path: |
-            app/
-            settings.gradle
-            build.gradle
-            gradle.properties
+          name: Cloud-Control-Python-Source
+          path: python_app/
