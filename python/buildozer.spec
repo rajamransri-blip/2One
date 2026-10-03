@@ -20,7 +20,7 @@ android.enable_androidx = True
 android.permissions = android.permission.INTERNET,android.permission.ACCESS_NETWORK_STATE
 android.allow_backup = True
 
-p4a.branch = develop
+p4a.branch = release-2024.01.21
 p4a.bootstrap = sdl2
 log_level = 2
 warn_on_root = 1
