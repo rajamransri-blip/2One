@@ -22,12 +22,13 @@ Deploy `server/` as a Docker service. Configure these environment variables:
 The API exposes FastAPI docs at `/docs` and health at `/health`.
 Authenticated dashboard summary is available at `/api/v1/dashboard`.
 Safe runtime checks are available at `/api/v1/diagnostics`.
+Mobile clients can provision a local user token at `/api/v1/provision`; it is rate-limited to five requests per device/IP per hour.
 
 ## Build the APK
 
 Open GitHub Actions and run **Build PTv APK**. The workflow uses the committed source in `python/` and uploads a `PTv-APK` artifact. It does not generate or commit source code during CI.
 
-The Android app connects to the API using a bearer token. Admin operations additionally require the server's `X-Admin-Key` value. Do not commit credentials.
+The Android app has no login screen: it provisions and stores its own bearer token locally. Admin-only server endpoints still require `X-Admin-Key`; do not commit credentials.
 
 ## Security fixes included
 
@@ -38,4 +39,5 @@ The Android app connects to the API using a bearer token. Admin operations addit
 - SQLite paths work for both `cloud.db` and nested paths.
 - API activity is written to the logs table.
 - Dashboard and diagnostics data are scoped to the authenticated token.
+- The mobile app stores generated user tokens locally and uses them automatically.
 - Local databases, bytecode, and Buildozer output are ignored by Git.

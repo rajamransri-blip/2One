@@ -50,6 +50,13 @@ class DeviceRequest(BaseModel):
     app_version: str = Field(default=APP_VERSION, max_length=30)
 
 
+class ProvisionRequest(BaseModel):
+    device_id: str = Field(min_length=1, max_length=200)
+    device_name: str = Field(default="PTv Mobile", max_length=100)
+    platform: str = Field(default="Android", max_length=50)
+    app_version: str = Field(default=APP_VERSION, max_length=30)
+
+
 def time_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -100,6 +107,12 @@ def initialize() -> None:
                 ip TEXT,
                 created_at TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS provision_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                device_id TEXT NOT NULL,
+                ip TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            );
             """
         )
 
@@ -146,6 +159,17 @@ def client_ip(request: Request) -> str:
     return request.client.host if request.client else ""
 
 
+def provision_allowed(device_id: str, ip: str) -> bool:
+    """Limit public provisioning to five requests per device/IP per hour."""
+    since = datetime.fromtimestamp(time.time() - 3600, timezone.utc).isoformat()
+    with connection() as conn:
+        count = conn.execute(
+            "SELECT COUNT(*) FROM provision_events WHERE device_id = ? AND ip = ? AND created_at >= ?",
+            (device_id, ip, since),
+        ).fetchone()[0]
+    return count < 5
+
+
 @app.get("/")
 def root() -> dict[str, Any]:
     return {"service": APP_NAME, "status": "online", "version": APP_VERSION}
@@ -165,6 +189,36 @@ def server_status(authorization: str | None = Header(default=None)) -> dict[str,
         "status": "online",
         "token_type": token["token_type"],
         "time": time_now(),
+    }
+
+
+@app.post("/api/v1/provision")
+def provision(body: ProvisionRequest, request: Request) -> dict[str, Any]:
+    """Create a scoped PTv token for the mobile app without an app login."""
+    ip = client_ip(request)
+    if not provision_allowed(body.device_id, ip):
+        raise HTTPException(status_code=429, detail="Provisioning limit reached; try again later")
+    raw = "ptv_live_" + secrets.token_urlsafe(32)
+    now = time_now()
+    with connection() as conn:
+        cursor = conn.execute(
+            """INSERT INTO tokens(token_hash, token_prefix, token_type, name, created_at)
+               VALUES (?, ?, 'python', ?, ?)""",
+            (digest(raw), raw[:18], f"PTv {body.device_name}"[:100], now),
+        )
+        token_id = cursor.lastrowid
+        conn.execute(
+            "INSERT INTO provision_events(device_id, ip, created_at) VALUES (?, ?, ?)",
+            (body.device_id, ip, now),
+        )
+    log_event(token_id, "mobile_provisioned", ip)
+    return {
+        "success": True,
+        "token": raw,
+        "token_id": token_id,
+        "type": "python",
+        "device_id": body.device_id,
+        "message": "PTv mobile token created; store it securely",
     }
 
 
@@ -333,9 +387,19 @@ def services(
     return {
         "success": True,
         "services": {
-            "python": True,
-            "supabase": bool(os.getenv("SUPABASE_URL")),
-            "firebase": bool(os.getenv("FIREBASE_PROJECT_ID")),
+            "python": {"enabled": True, "status": "ready", "label": "Python API"},
+            "supabase": {
+                "enabled": bool(os.getenv("SUPABASE_URL")),
+                "status": "configured" if os.getenv("SUPABASE_URL") else "not_configured",
+                "database": bool(os.getenv("SUPABASE_URL")),
+                "storage": bool(os.getenv("SUPABASE_URL")),
+            },
+            "firebase": {
+                "enabled": bool(os.getenv("FIREBASE_PROJECT_ID")),
+                "status": "configured" if os.getenv("FIREBASE_PROJECT_ID") else "not_configured",
+                "database": bool(os.getenv("FIREBASE_PROJECT_ID")),
+                "storage": bool(os.getenv("FIREBASE_PROJECT_ID")),
+            },
         },
     }
 

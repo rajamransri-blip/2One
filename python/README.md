@@ -15,6 +15,8 @@ The default connection is `https://twoones-l0s0.onrender.com`.
 - Dark operations dashboard with separate Home, Devices, Services, Tokens, Logs, Diagnostics, and Settings screens
 - Persistent server URL, bearer token, and admin-key fields
 - Dashboard summary and safe runtime diagnostics
+- No-login first-run provisioning: the app requests and stores its own user API token
+- Services screen with live Python, Supabase database/storage, and Firebase database/storage indicators
 
 ## Local run
 
