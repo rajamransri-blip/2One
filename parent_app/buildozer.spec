@@ -5,7 +5,7 @@ package.domain = org.consentsafety
 source.dir = .
 source.include_exts = py,png,jpg,kv,json
 version = 1.0.0
-requirements = python3,kivy==2.2.1,kivymd==2.0.0,pillow,qrcode,websocket-client,certifi,pyjnius
+requirements = python3,kivy==2.2.1,websocket-client
 orientation = portrait
 fullscreen = 0
 android.api = 35
