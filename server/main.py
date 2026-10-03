@@ -55,6 +55,12 @@ class ProvisionRequest(BaseModel):
     device_name: str = Field(default="PTv Mobile", max_length=100)
     platform: str = Field(default="Android", max_length=50)
     app_version: str = Field(default=APP_VERSION, max_length=30)
+    token_type: str = Field(default="python", max_length=32)
+
+
+class SQLRequest(BaseModel):
+    sql: str = Field(min_length=1, max_length=10000)
+    params: list[Any] = Field(default_factory=list, max_length=50)
 
 
 def time_now() -> str:
@@ -198,13 +204,16 @@ def provision(body: ProvisionRequest, request: Request) -> dict[str, Any]:
     ip = client_ip(request)
     if not provision_allowed(body.device_id, ip):
         raise HTTPException(status_code=429, detail="Provisioning limit reached; try again later")
+    token_type = body.token_type.lower().strip()
+    if token_type not in {"python", "supabase"}:
+        raise HTTPException(status_code=400, detail="token_type must be python or supabase")
     raw = "ptv_live_" + secrets.token_urlsafe(32)
     now = time_now()
     with connection() as conn:
         cursor = conn.execute(
             """INSERT INTO tokens(token_hash, token_prefix, token_type, name, created_at)
-               VALUES (?, ?, 'python', ?, ?)""",
-            (digest(raw), raw[:18], f"PTv {body.device_name}"[:100], now),
+               VALUES (?, ?, ?, ?, ?)""",
+            (digest(raw), raw[:18], token_type, f"PTv {body.device_name}"[:100], now),
         )
         token_id = cursor.lastrowid
         conn.execute(
@@ -216,7 +225,7 @@ def provision(body: ProvisionRequest, request: Request) -> dict[str, Any]:
         "success": True,
         "token": raw,
         "token_id": token_id,
-        "type": "python",
+        "type": token_type,
         "device_id": body.device_id,
         "message": "PTv mobile token created; store it securely",
     }
@@ -277,6 +286,52 @@ def diagnostics(
         "uptime_seconds": round(time.monotonic() - STARTED_AT, 1),
         "time": time_now(),
     }
+
+
+@app.get("/api/v1/database/tables")
+def database_tables(
+    request: Request,
+    authorization: str | None = Header(default=None),
+) -> dict[str, Any]:
+    token = authenticate(authorization)
+    with connection() as conn:
+        rows = conn.execute(
+            """SELECT name, type FROM sqlite_master
+               WHERE type IN ('table', 'view') AND name NOT LIKE 'sqlite_%'
+               ORDER BY name"""
+        ).fetchall()
+    log_event(token["id"], "database_tables_viewed", client_ip(request))
+    return {"success": True, "tables": [dict(row) for row in rows]}
+
+
+@app.post("/api/v1/sql")
+def execute_sql(
+    body: SQLRequest,
+    request: Request,
+    authorization: str | None = Header(default=None),
+) -> dict[str, Any]:
+    """Execute one controlled SQLite statement for the connected PTv workspace."""
+    token = authenticate(authorization)
+    sql = body.sql.strip()
+    first_word = sql.split(None, 1)[0].upper() if sql else ""
+    blocked = {"ATTACH", "DETACH", "VACUUM", "PRAGMA", "REINDEX", "ANALYZE"}
+    allowed = {"SELECT", "WITH", "CREATE", "INSERT", "UPDATE", "DELETE", "ALTER", "DROP"}
+    if ";" in sql.rstrip(";"):
+        raise HTTPException(status_code=400, detail="Only one SQL statement is allowed")
+    if first_word in blocked or first_word not in allowed:
+        raise HTTPException(status_code=400, detail="Only safe data and table SQL is allowed")
+    try:
+        with connection() as conn:
+            cursor = conn.execute(sql, body.params)
+            if first_word in {"SELECT", "WITH"}:
+                rows = cursor.fetchmany(500)
+                result = {"columns": [item[0] for item in cursor.description or []], "rows": [dict(row) for row in rows]}
+            else:
+                result = {"affected_rows": cursor.rowcount, "message": "SQL executed successfully"}
+    except sqlite3.Error as exc:
+        raise HTTPException(status_code=400, detail=f"SQL error: {exc}") from exc
+    log_event(token["id"], "sql_executed", client_ip(request))
+    return {"success": True, "statement": first_word, **result}
 
 
 @app.post("/api/v1/tokens")

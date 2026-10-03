@@ -38,6 +38,7 @@ jobs:
           paths = {route.path for route in app.routes}
           required = {
               '/', '/health', '/api/v1/server', '/api/v1/provision', '/api/v1/tokens',
+              '/api/v1/database/tables', '/api/v1/sql',
               '/api/v1/dashboard', '/api/v1/diagnostics',
               '/api/v1/devices', '/api/v1/devices/register',
               '/api/v1/services', '/api/v1/logs',
